@@ -14,10 +14,18 @@ const app = express()
 const httpServer = createServer(app)
 
 // Configure CORS for Socket.io
-const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:5173'
+const CORS_ORIGINS = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map(s => s.trim())
+  : ['http://localhost:5173', 'http://localhost:3000']
+
+// Add production URL if not already included
+if (!CORS_ORIGINS.includes('https://gjett-bildet.ak-kreativ.no')) {
+  CORS_ORIGINS.push('https://gjett-bildet.ak-kreativ.no')
+}
+
 const io = new Server(httpServer, {
   cors: {
-    origin: CORS_ORIGIN.split(',').map(s => s.trim()),
+    origin: CORS_ORIGINS,
     methods: ['GET', 'POST']
   }
 })
@@ -390,7 +398,7 @@ httpServer.listen(PORT, () => {
   Gjett bildet Game Server
 ====================================
   Port: ${PORT}
-  CORS: ${CORS_ORIGIN}
+  CORS: ${CORS_ORIGINS.join(', ')}
 ====================================
   `)
 })
