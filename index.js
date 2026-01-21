@@ -14,14 +14,15 @@ const app = express()
 const httpServer = createServer(app)
 
 // Configure CORS for Socket.io
+// Her legger vi til alle adressene som får lov til å snakke med serveren
 const CORS_ORIGINS = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map(s => s.trim())
-  : ['http://localhost:5173', 'http://localhost:3000']
-
-// Add production URL if not already included
-if (!CORS_ORIGINS.includes('https://gjett-bildet.ak-kreativ.no')) {
-  CORS_ORIGINS.push('https://gjett-bildet.ak-kreativ.no')
-}
+  : [
+      'http://localhost:5173', 
+      'http://localhost:3000',
+      'https://gjett-bildet.ak-kreativ.no', // Lærerens side
+      'https://join.ak-kreativ.no'          // Elevene sin side (VIKTIG!)
+    ]
 
 const io = new Server(httpServer, {
   cors: {
@@ -80,7 +81,7 @@ io.on('connection', (socket) => {
     }
 
     if (room.players.length === 0) {
-      socket.emit('room:error', { message: 'Ingen spillere har blitt med enn\u00e5' })
+      socket.emit('room:error', { message: 'Ingen spillere har blitt med ennå' })
       return
     }
 
@@ -317,7 +318,7 @@ io.on('connection', (socket) => {
 
     // Only allow if this player is selected
     if (room.selectedPlayer?.id !== socket.id) {
-      socket.emit('room:error', { message: 'Du er ikke valgt til \u00e5 svare' })
+      socket.emit('room:error', { message: 'Du er ikke valgt til å svare' })
       return
     }
 
