@@ -12,7 +12,7 @@ export const GAME_STATES = {
 
 const POINTS_BY_STEP = [100, 80, 60, 50, 40, 30, 20]
 const WRONG_ANSWER_PENALTY = 50 
-const PENALTY_DURATION = 3000   // 3 sekunder
+const PENALTY_DURATION = 3000   // 3 sekunder delay
 
 export class GameStateManager {
   constructor() {
@@ -46,7 +46,8 @@ export class GameStateManager {
       currentImageIndex: 0,
       currentRevealStep: 0,
       totalImages: 0,
-      playerCooldowns: new Map(),
+      playerCooldowns: new Map(), // Lagrer aktive straffer (tidspunkt)
+      eliminatedPlayers: new Set(), // Spillere som har svart feil på NÅVÆRENDE bilde
       createdAt: Date.now()
     }
     this.rooms.set(roomCode, room)
@@ -74,7 +75,8 @@ export class GameStateManager {
     if (!room) return false
     room.players = room.players.filter(p => p.id !== playerId)
     room.buzzerQueue = room.buzzerQueue.filter(id => id !== playerId)
-    if (room.playerCooldowns) room.playerCooldowns.delete(playerId)
+    room.playerCooldowns.delete(playerId)
+    room.eliminatedPlayers.delete(playerId)
     if (room.selectedPlayer?.id === playerId) room.selectedPlayer = null
     this.socketToPlayer.delete(playerId)
     return true
@@ -91,6 +93,7 @@ export class GameStateManager {
     room.buzzerLocked = false
     room.selectedPlayer = null
     room.playerCooldowns.clear()
+    room.eliminatedPlayers.clear()
     return true
   }
 
@@ -107,20 +110,27 @@ export class GameStateManager {
     if (room.gameState !== GAME_STATES.PLAYING) return { error: 'Kan ikke buzze n\u00e5' }
     if (room.buzzerLocked) return { error: 'Buzzer er l\u00e5st' }
 
-    // Sjekk cooldown
+    // 1. Er spilleren eliminert fra dette bildet? (Svarte feil tidligere i runden)
+    if (room.eliminatedPlayers.has(playerId)) {
+        return { error: 'Du må vente til neste bilde' }
+    }
+
+    // 2. Har spilleren en aktiv delay? (Straff fra forrige runde)
     if (room.playerCooldowns.has(playerId)) {
       const cooldownUntil = room.playerCooldowns.get(playerId)
       if (Date.now() < cooldownUntil) {
         const remaining = Math.ceil((cooldownUntil - Date.now()) / 1000)
         return { error: `Vent ${remaining}s (straff)` }
       } else {
-        room.playerCooldowns.delete(playerId)
+        room.playerCooldowns.delete(playerId) // Straffen er over
       }
     }
 
     if (room.buzzerQueue.includes(playerId)) return { error: 'Du har allerede buzzet' }
+    
     room.buzzerQueue.push(playerId)
     if (room.buzzerQueue.length >= 5) room.buzzerLocked = true
+    
     return { success: true, queue: room.buzzerQueue, locked: room.buzzerLocked }
   }
 
@@ -148,35 +158,67 @@ export class GameStateManager {
       room.buzzerLocked = false
       room.selectedPlayer = null
       room.playerCooldowns.clear()
+      room.eliminatedPlayers.clear() // Riktig svar = ingen straff
+      
       return { correct: true, points, playerScore: player.score, players: room.players.map(p => ({ id: p.id, name: p.name, score: p.score })) }
     } else {
-      // Minuspoeng og straff
+      // FEIL SVAR
       player.score -= WRONG_ANSWER_PENALTY;
-      room.playerCooldowns.set(playerId, Date.now() + PENALTY_DURATION)
+      
+      // Merk spilleren som eliminert for RESTEN av dette bildet
+      room.eliminatedPlayers.add(playerId)
+
       room.buzzerQueue = room.buzzerQueue.filter(id => id !== playerId)
       room.selectedPlayer = null
       room.gameState = GAME_STATES.PLAYING
       if (room.buzzerQueue.length < 5) room.buzzerLocked = false
-      return { correct: false, queue: room.buzzerQueue, locked: room.buzzerLocked, penalty: true, penaltyDuration: PENALTY_DURATION, players: room.players.map(p => ({ id: p.id, name: p.name, score: p.score })) }
+      
+      return { 
+          correct: false, 
+          queue: room.buzzerQueue, 
+          locked: room.buzzerLocked, 
+          eliminated: true, // Signaliserer til frontend at man er ute av runden
+          players: room.players.map(p => ({ id: p.id, name: p.name, score: p.score })) 
+      }
     }
   }
 
   nextImage(roomCode) {
     const room = this.rooms.get(roomCode)
     if (!room) return null
+    
     room.currentImageIndex++
     room.currentRevealStep = 0
     room.buzzerQueue = []
     room.buzzerLocked = false
     room.selectedPlayer = null
-    room.playerCooldowns.clear()
+    room.playerCooldowns.clear() // Fjern gamle timeouts
+
+    // --- HER SKJER DET MAGISKE ---
+    // Alle som ble eliminert i forrige runde (svarte feil), får nå en delay
+    const penalizedPlayers = []
+    room.eliminatedPlayers.forEach(playerId => {
+        room.playerCooldowns.set(playerId, Date.now() + PENALTY_DURATION)
+        penalizedPlayers.push(playerId)
+    })
+    
+    // Nå som vi har delt ut straff for neste runde, tømmer vi eliminerings-listen
+    room.eliminatedPlayers.clear()
 
     if (room.currentImageIndex >= room.totalImages) {
       room.gameState = GAME_STATES.GAME_OVER
       return { gameOver: true, finalScores: room.players.map(p => ({ id: p.id, name: p.name, score: p.score })).sort((a, b) => b.score - a.score) }
     }
+    
     room.gameState = GAME_STATES.PLAYING
-    return { gameOver: false, imageIndex: room.currentImageIndex, totalImages: room.totalImages }
+    
+    return { 
+        gameOver: false, 
+        imageIndex: room.currentImageIndex, 
+        totalImages: room.totalImages,
+        penalizedPlayers, // Liste over spillere som skal ha delay
+        penaltyDuration: PENALTY_DURATION
+    }
   }
 
   clearBuzzerQueue(roomCode) {
