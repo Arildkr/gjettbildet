@@ -76,7 +76,6 @@ io.on('connection', (socket) => {
     } else {
       io.to(roomCode).emit('game:answer-result', { playerId, isCorrect: false })
       if (result.penalty) {
-          // Send straff kun til spiller
           io.to(playerId).emit('student:penalty', { duration: result.penaltyDuration })
       }
       io.to(roomCode).emit('game:buzzer-queue-updated', { queue: result.queue, locked: result.locked })
