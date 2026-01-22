@@ -5,12 +5,11 @@
 import express from 'express'
 import { createServer } from 'http'
 import { Server } from 'socket.io'
-import { GameStateManager } from './gameState.js'
+import { GameStateManager, GAME_STATES } from './gameState.js'
 
 const app = express()
 const httpServer = createServer(app)
 
-// CORS konfigurasjon - Tillater både localhost og din produksjons-URL
 const CORS_ORIGINS = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map(s => s.trim())
   : ['http://localhost:5173', 'http://localhost:3000']
@@ -35,7 +34,6 @@ setInterval(() => gameManager.cleanupOldRooms(), 30 * 60 * 1000)
 io.on('connection', (socket) => {
   console.log(`Client connected: ${socket.id}`)
 
-  // HOST EVENTS
   socket.on('host:create-room', ({ category, mode }, callback) => {
     try {
       const roomCode = gameManager.createRoom(socket.id, category, mode)
@@ -78,7 +76,7 @@ io.on('connection', (socket) => {
     } else {
       io.to(roomCode).emit('game:answer-result', { playerId, isCorrect: false })
       if (result.penalty) {
-          // NYTT: Sender straffebeskjed til eleven
+          // Send straff kun til spiller
           io.to(playerId).emit('student:penalty', { duration: result.penaltyDuration })
       }
       io.to(roomCode).emit('game:buzzer-queue-updated', { queue: result.queue, locked: result.locked })
@@ -114,7 +112,6 @@ io.on('connection', (socket) => {
     io.to(roomCode).emit('game:ended', { finalScores })
   })
 
-  // STUDENT EVENTS
   socket.on('student:join-room', ({ roomCode, playerName }, callback) => {
     const result = gameManager.addPlayer(roomCode, socket.id, playerName)
     if (result?.error) {
@@ -150,7 +147,6 @@ io.on('connection', (socket) => {
     if (room) io.to(roomCode).emit('room:player-left', { players: room.players.map(p => ({ id: p.id, name: p.name, score: p.score })) })
   })
 
-  // GENERAL
   socket.on('sync:request', ({ roomCode }) => {
     const state = gameManager.getFullState(roomCode)
     if (state) socket.emit('sync:state', state)
