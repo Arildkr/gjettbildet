@@ -1,6 +1,6 @@
 /**
- * Socket.io Server for Gjett bildet Game Show Mode
- * "Kill Switch" versjon - Tillater alle tilkoblinger
+ * Socket.io Server - "Open Access" version
+ * Fikser tilkoblingsproblemer ved å tillate alle origins.
  */
 
 import express from 'express'
@@ -11,7 +11,8 @@ import { GameStateManager } from './gameState.js'
 const app = express()
 const httpServer = createServer(app)
 
-// TILLAT ALLE TILKOBLINGER (Løser CORS-problemene dine)
+// VIKTIG: origin: '*' betyr at vi tillater tilkobling fra HVOR SOM HELST.
+// Dette fikser problemet hvis serveren tror nettsiden din er "feil" adresse.
 const io = new Server(httpServer, {
   cors: {
     origin: '*', 
@@ -21,6 +22,7 @@ const io = new Server(httpServer, {
 
 const gameManager = new GameStateManager()
 
+// Enkel helsesjekk
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', rooms: gameManager.rooms.size })
 })
