@@ -21,29 +21,22 @@ const PENALTY_DURATION = 3000   // 3 sekunder
 export class GameStateManager {
   constructor() {
     this.rooms = new Map()
-    this.socketToRoom = new Map() // Maps socket.id to roomCode
-    this.socketToPlayer = new Map() // Maps socket.id to { roomCode, playerId }
+    this.socketToRoom = new Map()
+    this.socketToPlayer = new Map()
   }
 
-  /**
-   * Generate a random 6-character room code
-   */
   generateRoomCode() {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789' // No I, O, 0, 1 for clarity
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
     let code = ''
     for (let i = 0; i < 6; i++) {
       code += chars.charAt(Math.floor(Math.random() * chars.length))
     }
-    // Ensure uniqueness
     if (this.rooms.has(code)) {
       return this.generateRoomCode()
     }
     return code
   }
 
-  /**
-   * Create a new game room
-   */
   createRoom(hostSocketId, category, mode) {
     const roomCode = this.generateRoomCode()
 
@@ -60,7 +53,7 @@ export class GameStateManager {
       currentImageIndex: 0,
       currentRevealStep: 0,
       totalImages: 0,
-      playerCooldowns: new Map(), // Lagrer tidsstempel for når straffen er over
+      playerCooldowns: new Map(), // NYTT: Lagrer straffe-tid
       createdAt: Date.now()
     }
 
@@ -82,7 +75,6 @@ export class GameStateManager {
     const room = this.rooms.get(roomCode)
     if (!room) return null
 
-    // Check if player name already exists
     const existingPlayer = room.players.find(p =>
       p.name.toLowerCase() === playerName.toLowerCase()
     )
@@ -111,6 +103,7 @@ export class GameStateManager {
     room.players = room.players.filter(p => p.id !== playerId)
     room.buzzerQueue = room.buzzerQueue.filter(id => id !== playerId)
     
+    // NYTT: Fjern eventuell cooldown
     if (room.playerCooldowns) {
         room.playerCooldowns.delete(playerId)
     }
@@ -159,14 +152,13 @@ export class GameStateManager {
       return { error: 'Buzzer er l\u00e5st' }
     }
 
-    // Sjekk om spilleren har straff (cooldown)
+    // NYTT: Sjekk cooldown (straff)
     if (room.playerCooldowns.has(playerId)) {
       const cooldownUntil = room.playerCooldowns.get(playerId)
       if (Date.now() < cooldownUntil) {
         const remaining = Math.ceil((cooldownUntil - Date.now()) / 1000)
         return { error: `Vent ${remaining}s (straff)` }
       } else {
-        // Straffen er over
         room.playerCooldowns.delete(playerId)
       }
     }
@@ -205,7 +197,6 @@ export class GameStateManager {
     if (!player) return null
 
     if (isCorrect) {
-      // RIKTIG SVAR
       const points = POINTS_BY_STEP[room.currentRevealStep] || 20
       player.score += points
 
@@ -213,7 +204,7 @@ export class GameStateManager {
       room.buzzerQueue = []
       room.buzzerLocked = false
       room.selectedPlayer = null
-      room.playerCooldowns.clear() // Nullstill alle straffer når runden er over
+      room.playerCooldowns.clear()
 
       return {
         correct: true,
@@ -222,10 +213,10 @@ export class GameStateManager {
         players: room.players.map(p => ({ id: p.id, name: p.name, score: p.score }))
       }
     } else {
-      // FEIL SVAR - Minuspoeng og straffetid
+      // NYTT: Minuspoeng og straff
       player.score -= WRONG_ANSWER_PENALTY;
       
-      // Sett straffetidspunkt
+      // Sett straff (nåtid + 3 sekunder)
       room.playerCooldowns.set(playerId, Date.now() + PENALTY_DURATION)
 
       room.buzzerQueue = room.buzzerQueue.filter(id => id !== playerId)
@@ -256,7 +247,7 @@ export class GameStateManager {
     room.buzzerQueue = []
     room.buzzerLocked = false
     room.selectedPlayer = null
-    room.playerCooldowns.clear() // Nullstill straffer
+    room.playerCooldowns.clear()
 
     if (room.currentImageIndex >= room.totalImages) {
       room.gameState = GAME_STATES.GAME_OVER
@@ -303,7 +294,6 @@ export class GameStateManager {
     if (roomCode) {
       const room = this.rooms.get(roomCode)
       if (room) {
-        // Host disconnect
         for (const player of room.players) {
           this.socketToPlayer.delete(player.id)
         }
@@ -317,7 +307,6 @@ export class GameStateManager {
     if (playerInfo) {
       const room = this.rooms.get(playerInfo.roomCode)
       if (room) {
-        // Player disconnect
         const player = room.players.find(p => p.id === socketId)
         if (player) {
           player.isConnected = false
