@@ -75,9 +75,12 @@ io.on('connection', (socket) => {
       io.to(roomCode).emit('game:scores-updated', { players: result.players })
     } else {
       io.to(roomCode).emit('game:answer-result', { playerId, isCorrect: false })
-      if (result.penalty) {
-          io.to(playerId).emit('student:penalty', { duration: result.penaltyDuration })
+      
+      // Hvis spiller ble eliminert (fra dette bildet), gi beskjed
+      if (result.eliminated) {
+          io.to(playerId).emit('student:eliminated')
       }
+
       io.to(roomCode).emit('game:buzzer-queue-updated', { queue: result.queue, locked: result.locked })
       io.to(roomCode).emit('game:scores-updated', { players: result.players })
     }
@@ -89,8 +92,16 @@ io.on('connection', (socket) => {
     if (result.gameOver) {
       io.to(roomCode).emit('game:ended', { finalScores: result.finalScores })
     } else {
+      // 1. Bytt bilde først
       io.to(roomCode).emit('game:image-changed', { imageIndex: result.imageIndex, totalImages: result.totalImages })
       io.to(roomCode).emit('game:buzzer-queue-updated', { queue: [], locked: false })
+      
+      // 2. Send straffemeldinger til de som svarte feil sist
+      if (result.penalizedPlayers && result.penalizedPlayers.length > 0) {
+          result.penalizedPlayers.forEach(playerId => {
+              io.to(playerId).emit('student:penalty', { duration: result.penaltyDuration })
+          })
+      }
     }
   })
 
