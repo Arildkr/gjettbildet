@@ -46,8 +46,8 @@ export class GameStateManager {
       currentImageIndex: 0,
       currentRevealStep: 0,
       totalImages: 0,
-      playerCooldowns: new Map(), // Lagrer aktive straffer (tidspunkt)
-      eliminatedPlayers: new Set(), // Spillere som har svart feil på NÅVÆRENDE bilde
+      playerCooldowns: new Map(), 
+      eliminatedPlayers: new Set(), // Holder styr på hvem som er ute av NÅVÆRENDE bilde
       createdAt: Date.now()
     }
     this.rooms.set(roomCode, room)
@@ -110,27 +110,25 @@ export class GameStateManager {
     if (room.gameState !== GAME_STATES.PLAYING) return { error: 'Kan ikke buzze n\u00e5' }
     if (room.buzzerLocked) return { error: 'Buzzer er l\u00e5st' }
 
-    // 1. Er spilleren eliminert fra dette bildet? (Svarte feil tidligere i runden)
+    // 1. Er du eliminert? (Svarte feil i denne runden)
     if (room.eliminatedPlayers.has(playerId)) {
         return { error: 'Du må vente til neste bilde' }
     }
 
-    // 2. Har spilleren en aktiv delay? (Straff fra forrige runde)
+    // 2. Har du straff? (Svarte feil forrige runde)
     if (room.playerCooldowns.has(playerId)) {
       const cooldownUntil = room.playerCooldowns.get(playerId)
       if (Date.now() < cooldownUntil) {
         const remaining = Math.ceil((cooldownUntil - Date.now()) / 1000)
         return { error: `Vent ${remaining}s (straff)` }
       } else {
-        room.playerCooldowns.delete(playerId) // Straffen er over
+        room.playerCooldowns.delete(playerId) // Tiden er ute
       }
     }
 
     if (room.buzzerQueue.includes(playerId)) return { error: 'Du har allerede buzzet' }
-    
     room.buzzerQueue.push(playerId)
     if (room.buzzerQueue.length >= 5) room.buzzerLocked = true
-    
     return { success: true, queue: room.buzzerQueue, locked: room.buzzerLocked }
   }
 
@@ -157,15 +155,17 @@ export class GameStateManager {
       room.buzzerQueue = []
       room.buzzerLocked = false
       room.selectedPlayer = null
+      
+      // Riktig svar vasker tavla
       room.playerCooldowns.clear()
-      room.eliminatedPlayers.clear() // Riktig svar = ingen straff
+      room.eliminatedPlayers.clear()
       
       return { correct: true, points, playerScore: player.score, players: room.players.map(p => ({ id: p.id, name: p.name, score: p.score })) }
     } else {
       // FEIL SVAR
       player.score -= WRONG_ANSWER_PENALTY;
       
-      // Merk spilleren som eliminert for RESTEN av dette bildet
+      // BLOKKER SPILLER RESTEN AV DETTE BILDET
       room.eliminatedPlayers.add(playerId)
 
       room.buzzerQueue = room.buzzerQueue.filter(id => id !== playerId)
@@ -177,7 +177,7 @@ export class GameStateManager {
           correct: false, 
           queue: room.buzzerQueue, 
           locked: room.buzzerLocked, 
-          eliminated: true, // Signaliserer til frontend at man er ute av runden
+          eliminated: true, // Send beskjed om at de er blokkert nå
           players: room.players.map(p => ({ id: p.id, name: p.name, score: p.score })) 
       }
     }
@@ -192,17 +192,16 @@ export class GameStateManager {
     room.buzzerQueue = []
     room.buzzerLocked = false
     room.selectedPlayer = null
-    room.playerCooldowns.clear() // Fjern gamle timeouts
+    room.playerCooldowns.clear()
 
-    // --- HER SKJER DET MAGISKE ---
-    // Alle som ble eliminert i forrige runde (svarte feil), får nå en delay
+    // --- OVERFØR ELIMINERTE TIL STRAFF ---
     const penalizedPlayers = []
     room.eliminatedPlayers.forEach(playerId => {
+        // De som svarte feil sist, får 3 sekunder straff nå
         room.playerCooldowns.set(playerId, Date.now() + PENALTY_DURATION)
         penalizedPlayers.push(playerId)
     })
-    
-    // Nå som vi har delt ut straff for neste runde, tømmer vi eliminerings-listen
+    // Tøm listen over eliminerte (de er nå "straffet" i stedet)
     room.eliminatedPlayers.clear()
 
     if (room.currentImageIndex >= room.totalImages) {
@@ -216,7 +215,7 @@ export class GameStateManager {
         gameOver: false, 
         imageIndex: room.currentImageIndex, 
         totalImages: room.totalImages,
-        penalizedPlayers, // Liste over spillere som skal ha delay
+        penalizedPlayers, // Liste over spillere som skal få beskjed om nedtelling
         penaltyDuration: PENALTY_DURATION
     }
   }
@@ -239,6 +238,7 @@ export class GameStateManager {
   }
 
   handleDisconnect(socketId) {
+    // ... (Behold standard logikk)
     const roomCode = this.socketToRoom.get(socketId)
     if (roomCode) {
       const room = this.rooms.get(roomCode)
