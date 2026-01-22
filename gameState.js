@@ -11,7 +11,6 @@ export const GAME_STATES = {
 }
 
 const POINTS_BY_STEP = [100, 80, 60, 50, 40, 30, 20]
-// KONFIGURASJON: Straff og Cooldown
 const WRONG_ANSWER_PENALTY = 50 
 const PENALTY_DURATION = 3000   // 3 sekunder
 
@@ -47,7 +46,7 @@ export class GameStateManager {
       currentImageIndex: 0,
       currentRevealStep: 0,
       totalImages: 0,
-      playerCooldowns: new Map(), // NYTT: Lagrer straffe-tid
+      playerCooldowns: new Map(),
       createdAt: Date.now()
     }
     this.rooms.set(roomCode, room)
@@ -108,7 +107,7 @@ export class GameStateManager {
     if (room.gameState !== GAME_STATES.PLAYING) return { error: 'Kan ikke buzze n\u00e5' }
     if (room.buzzerLocked) return { error: 'Buzzer er l\u00e5st' }
 
-    // NYTT: Sjekk cooldown
+    // Sjekk cooldown
     if (room.playerCooldowns.has(playerId)) {
       const cooldownUntil = room.playerCooldowns.get(playerId)
       if (Date.now() < cooldownUntil) {
@@ -151,7 +150,7 @@ export class GameStateManager {
       room.playerCooldowns.clear()
       return { correct: true, points, playerScore: player.score, players: room.players.map(p => ({ id: p.id, name: p.name, score: p.score })) }
     } else {
-      // NYTT: Minuspoeng og straff
+      // Minuspoeng og straff
       player.score -= WRONG_ANSWER_PENALTY;
       room.playerCooldowns.set(playerId, Date.now() + PENALTY_DURATION)
       room.buzzerQueue = room.buzzerQueue.filter(id => id !== playerId)
