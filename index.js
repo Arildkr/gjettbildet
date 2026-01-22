@@ -14,15 +14,14 @@ const app = express()
 const httpServer = createServer(app)
 
 // Configure CORS for Socket.io
-// Her legger vi til alle adressene som får lov til å snakke med serveren
 const CORS_ORIGINS = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map(s => s.trim())
-  : [
-      'http://localhost:5173', 
-      'http://localhost:3000',
-      'https://gjett-bildet.ak-kreativ.no', // Lærerens side
-      'https://join.ak-kreativ.no'          // Elevene sin side (VIKTIG!)
-    ]
+  : ['http://localhost:5173', 'http://localhost:3000']
+
+// Add production URL if not already included
+if (!CORS_ORIGINS.includes('https://gjett-bildet.ak-kreativ.no')) {
+  CORS_ORIGINS.push('https://gjett-bildet.ak-kreativ.no')
+}
 
 const io = new Server(httpServer, {
   cors: {
@@ -48,9 +47,6 @@ io.on('connection', (socket) => {
 
   // ==================== HOST EVENTS ====================
 
-  /**
-   * Host creates a new game room
-   */
   socket.on('host:create-room', ({ category, mode }, callback) => {
     try {
       const roomCode = gameManager.createRoom(socket.id, category, mode)
@@ -70,9 +66,6 @@ io.on('connection', (socket) => {
     }
   })
 
-  /**
-   * Host starts the game
-   */
   socket.on('host:start-game', ({ roomCode, totalImages }) => {
     const room = gameManager.getRoom(roomCode)
     if (!room || room.hostSocketId !== socket.id) {
@@ -81,7 +74,7 @@ io.on('connection', (socket) => {
     }
 
     if (room.players.length === 0) {
-      socket.emit('room:error', { message: 'Ingen spillere har blitt med ennå' })
+      socket.emit('room:error', { message: 'Ingen spillere har blitt med enn\u00e5' })
       return
     }
 
@@ -89,31 +82,23 @@ io.on('connection', (socket) => {
 
     console.log(`Game started in room ${roomCode} with ${totalImages} images`)
 
-    // Notify all in room
     io.to(roomCode).emit('game:started', {
       totalImages,
       players: room.players.map(p => ({ id: p.id, name: p.name, score: p.score }))
     })
   })
 
-  /**
-   * Host reveals next step of image
-   */
   socket.on('host:reveal-step', ({ roomCode, step }) => {
     const room = gameManager.getRoom(roomCode)
     if (!room || room.hostSocketId !== socket.id) return
 
     gameManager.updateRevealStep(roomCode, step)
 
-    // Notify all players
     io.to(roomCode).emit('game:reveal-updated', {
       revealStep: step
     })
   })
 
-  /**
-   * Host selects a player from buzzer queue to answer
-   */
   socket.on('host:select-player', ({ roomCode, playerId }) => {
     const room = gameManager.getRoom(roomCode)
     if (!room || room.hostSocketId !== socket.id) return
@@ -123,15 +108,13 @@ io.on('connection', (socket) => {
 
     console.log(`Player selected to answer: ${selectedPlayer.name} in room ${roomCode}`)
 
-    // Notify everyone
     io.to(roomCode).emit('game:player-selected', selectedPlayer)
-
-    // Send special event to the selected player to show input
     io.to(playerId).emit('game:answer-request', { playerId })
   })
 
   /**
    * Host validates player's answer
+   * NYTT: Håndterer nå score-oppdatering også ved feil svar (minuspoeng)
    */
   socket.on('host:validate-answer', ({ roomCode, playerId, isCorrect }) => {
     const room = gameManager.getRoom(roomCode)
@@ -143,7 +126,7 @@ io.on('connection', (socket) => {
     console.log(`Answer ${isCorrect ? 'correct' : 'wrong'} from ${playerId} in room ${roomCode}`)
 
     if (result.correct) {
-      // Notify everyone of correct answer and updated scores
+      // Riktig svar
       io.to(roomCode).emit('game:answer-result', {
         playerId,
         isCorrect: true,
@@ -151,21 +134,23 @@ io.on('connection', (socket) => {
       })
       io.to(roomCode).emit('game:scores-updated', { players: result.players })
     } else {
-      // Notify of wrong answer and updated queue
+      // Feil svar (Sender nå også scores-updated pga minuspoeng)
       io.to(roomCode).emit('game:answer-result', {
         playerId,
         isCorrect: false
       })
+      
+      // Oppdater køen
       io.to(roomCode).emit('game:buzzer-queue-updated', {
         queue: result.queue,
         locked: result.locked
       })
+
+      // NYTT: Oppdater poengsummen til alle (siden spilleren fikk minuspoeng)
+      io.to(roomCode).emit('game:scores-updated', { players: result.players })
     }
   })
 
-  /**
-   * Host moves to next image
-   */
   socket.on('host:next-image', ({ roomCode }) => {
     const room = gameManager.getRoom(roomCode)
     if (!room || room.hostSocketId !== socket.id) return
@@ -182,7 +167,6 @@ io.on('connection', (socket) => {
         imageIndex: result.imageIndex,
         totalImages: result.totalImages
       })
-      // Clear buzzer queue for new image
       io.to(roomCode).emit('game:buzzer-queue-updated', {
         queue: [],
         locked: false
@@ -190,9 +174,6 @@ io.on('connection', (socket) => {
     }
   })
 
-  /**
-   * Host clears buzzer queue
-   */
   socket.on('host:clear-buzzer', ({ roomCode }) => {
     const room = gameManager.getRoom(roomCode)
     if (!room || room.hostSocketId !== socket.id) return
@@ -206,9 +187,6 @@ io.on('connection', (socket) => {
     io.to(roomCode).emit('game:player-selected', null)
   })
 
-  /**
-   * Host kicks a player
-   */
   socket.on('host:kick-player', ({ roomCode, playerId }) => {
     const room = gameManager.getRoom(roomCode)
     if (!room || room.hostSocketId !== socket.id) return
@@ -217,19 +195,13 @@ io.on('connection', (socket) => {
 
     console.log(`Player ${playerId} kicked from room ${roomCode}`)
 
-    // Notify kicked player
     io.to(playerId).emit('room:kicked')
-
-    // Notify everyone of updated player list
     io.to(roomCode).emit('room:player-left', {
       playerId,
       players: room.players.map(p => ({ id: p.id, name: p.name, score: p.score }))
     })
   })
 
-  /**
-   * Host ends the game
-   */
   socket.on('host:end-game', ({ roomCode }) => {
     const room = gameManager.getRoom(roomCode)
     if (!room || room.hostSocketId !== socket.id) return
@@ -243,9 +215,6 @@ io.on('connection', (socket) => {
 
   // ==================== STUDENT EVENTS ====================
 
-  /**
-   * Student joins a room
-   */
   socket.on('student:join-room', ({ roomCode, playerName }, callback) => {
     const room = gameManager.getRoom(roomCode)
 
@@ -279,16 +248,12 @@ io.on('connection', (socket) => {
       callback({ success: true, playerId: socket.id, playerName })
     }
 
-    // Notify everyone in room
     io.to(roomCode).emit('room:player-joined', {
       player: { id: result.id, name: result.name, score: 0 },
       players: room.players.map(p => ({ id: p.id, name: p.name, score: p.score }))
     })
   })
 
-  /**
-   * Student presses buzzer
-   */
   socket.on('student:buzz', ({ roomCode }) => {
     const result = gameManager.buzz(roomCode, socket.id)
 
@@ -302,23 +267,18 @@ io.on('connection', (socket) => {
 
     console.log(`Player ${player?.name || socket.id} buzzed in room ${roomCode}`)
 
-    // Notify everyone
     io.to(roomCode).emit('game:buzzer-queue-updated', {
       queue: result.queue,
       locked: result.locked
     })
   })
 
-  /**
-   * Student submits answer
-   */
   socket.on('student:submit-answer', ({ roomCode, answer }) => {
     const room = gameManager.getRoom(roomCode)
     if (!room) return
 
-    // Only allow if this player is selected
     if (room.selectedPlayer?.id !== socket.id) {
-      socket.emit('room:error', { message: 'Du er ikke valgt til å svare' })
+      socket.emit('room:error', { message: 'Du er ikke valgt til \u00e5 svare' })
       return
     }
 
@@ -326,7 +286,6 @@ io.on('connection', (socket) => {
 
     console.log(`Answer submitted by ${player?.name}: "${answer}" in room ${roomCode}`)
 
-    // Send answer to host for validation
     io.to(room.hostSocketId).emit('game:answer-submitted', {
       playerId: socket.id,
       playerName: player?.name || 'Ukjent',
@@ -334,9 +293,6 @@ io.on('connection', (socket) => {
     })
   })
 
-  /**
-   * Student leaves room
-   */
   socket.on('student:leave', ({ roomCode }) => {
     const room = gameManager.getRoom(roomCode)
     if (!room) return
@@ -354,9 +310,6 @@ io.on('connection', (socket) => {
 
   // ==================== GENERAL EVENTS ====================
 
-  /**
-   * Request full state sync (for reconnection)
-   */
   socket.on('sync:request', ({ roomCode }) => {
     const state = gameManager.getFullState(roomCode)
     if (state) {
@@ -364,9 +317,6 @@ io.on('connection', (socket) => {
     }
   })
 
-  /**
-   * Handle disconnection
-   */
   socket.on('disconnect', () => {
     console.log(`Client disconnected: ${socket.id}`)
 
@@ -374,13 +324,11 @@ io.on('connection', (socket) => {
 
     if (result) {
       if (result.type === 'host') {
-        // Host disconnected - notify all players
         console.log(`Host disconnected, closing room ${result.roomCode}`)
         io.to(result.roomCode).emit('room:closed', {
           reason: 'Verten koblet fra'
         })
       } else if (result.type === 'player') {
-        // Player disconnected - notify room
         console.log(`Player disconnected from room ${result.roomCode}`)
         io.to(result.roomCode).emit('room:player-left', {
           playerId: result.playerId,
