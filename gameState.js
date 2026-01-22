@@ -12,8 +12,10 @@ export const GAME_STATES = {
   GAME_OVER: 'GAME_OVER'
 }
 
-// Points for correct answers based on reveal step
+// Points configuration
 const POINTS_BY_STEP = [100, 80, 60, 50, 40, 30, 20]
+const WRONG_ANSWER_PENALTY = 50 // Minuspoeng ved feil svar
+const PENALTY_DELAY_MS = 3000   // 3 sekunder straffetid neste runde
 
 export class GameStateManager {
   constructor() {
@@ -100,7 +102,9 @@ export class GameStateManager {
       name: playerName,
       score: 0,
       isConnected: true,
-      joinedAt: Date.now()
+      joinedAt: Date.now(),
+      nextRoundPenalty: false, // NYTT: Holder styr på om spilleren skal straffes
+      blockedUntil: 0          // NYTT: Tidsstempel for når buzzer åpnes igjen
     }
 
     room.players.push(player)
@@ -145,6 +149,12 @@ export class GameStateManager {
     room.buzzerQueue = []
     room.buzzerLocked = false
     room.selectedPlayer = null
+    
+    // Reset penalties ved start
+    room.players.forEach(p => {
+      p.nextRoundPenalty = false
+      p.blockedUntil = 0
+    })
 
     return true
   }
@@ -168,11 +178,19 @@ export class GameStateManager {
     if (!room) return { error: 'Rom finnes ikke' }
 
     if (room.gameState !== GAME_STATES.PLAYING) {
-      return { error: 'Kan ikke buzze n\u00e5' }
+      return { error: 'Kan ikke buzze nå' }
+    }
+
+    // NYTT: Sjekk om spilleren har tidsstraff
+    const player = room.players.find(p => p.id === playerId)
+    if (player && player.blockedUntil && Date.now() < player.blockedUntil) {
+      // Beregn gjenværende tid for en hyggelig feilmelding (valgfritt)
+      // const remaining = Math.ceil((player.blockedUntil - Date.now()) / 1000)
+      return { error: 'Du har tidsstraff pga. feil svar' }
     }
 
     if (room.buzzerLocked) {
-      return { error: 'Buzzer er l\u00e5st' }
+      return { error: 'Buzzer er låst' }
     }
 
     if (room.buzzerQueue.includes(playerId)) {
@@ -219,6 +237,9 @@ export class GameStateManager {
       // Award points based on reveal step
       const points = POINTS_BY_STEP[room.currentRevealStep] || 20
       player.score += points
+      
+      // Clear penalty flag just in case
+      player.nextRoundPenalty = false
 
       // Move to round end
       room.gameState = GAME_STATES.ROUND_END
@@ -233,6 +254,13 @@ export class GameStateManager {
         players: room.players.map(p => ({ id: p.id, name: p.name, score: p.score }))
       }
     } else {
+      // NYTT: Minuspoeng
+      player.score = Math.max(0, player.score - WRONG_ANSWER_PENALTY)
+      
+      // NYTT: Merk spilleren for straff i neste runde (eller neste forsøk på samme bilde)
+      // Hvis du vil at de skal straffes på NESTE bilde, setter vi flagget her.
+      player.nextRoundPenalty = true 
+
       // Remove from buzzer queue and clear selection
       room.buzzerQueue = room.buzzerQueue.filter(id => id !== playerId)
       room.selectedPlayer = null
@@ -246,7 +274,8 @@ export class GameStateManager {
       return {
         correct: false,
         queue: room.buzzerQueue,
-        locked: room.buzzerLocked
+        locked: room.buzzerLocked,
+        players: room.players.map(p => ({ id: p.id, name: p.name, score: p.score })) // Send updated scores (minus points)
       }
     }
   }
@@ -263,6 +292,17 @@ export class GameStateManager {
     room.buzzerQueue = []
     room.buzzerLocked = false
     room.selectedPlayer = null
+
+    // NYTT: Påfør tidsstraff til de som svarte feil i forrige runde
+    const now = Date.now()
+    room.players.forEach(p => {
+      if (p.nextRoundPenalty) {
+        p.blockedUntil = now + PENALTY_DELAY_MS // Blokkert i 3 sekunder
+        p.nextRoundPenalty = false // Nullstill flagget
+      } else {
+        p.blockedUntil = 0
+      }
+    })
 
     if (room.currentImageIndex >= room.totalImages) {
       room.gameState = GAME_STATES.GAME_OVER
