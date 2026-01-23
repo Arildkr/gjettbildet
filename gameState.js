@@ -163,7 +163,10 @@ export class GameStateManager {
       return { correct: true, points, playerScore: player.score, players: room.players.map(p => ({ id: p.id, name: p.name, score: p.score })) }
     } else {
       // FEIL SVAR
-      player.score -= WRONG_ANSWER_PENALTY;
+      if (player.score > 0) {
+          // Trekker 50 poeng, men stopper på 0 (ingen negative tall)
+          player.score = Math.max(0, player.score - WRONG_ANSWER_PENALTY)
+      }
       
       // BLOKKER SPILLER RESTEN AV DETTE BILDET
       room.eliminatedPlayers.add(playerId)
