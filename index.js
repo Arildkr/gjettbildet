@@ -29,6 +29,8 @@ const gameManager = new GameStateManager()
 
 app.get('/health', (req, res) => res.json({ status: 'ok', rooms: gameManager.rooms.size }))
 
+app.get('/ping', (req, res) => res.send('pong'))
+
 setInterval(() => gameManager.cleanupOldRooms(), 30 * 60 * 1000)
 
 io.on('connection', (socket) => {
